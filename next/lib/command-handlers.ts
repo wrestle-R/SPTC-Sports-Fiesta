@@ -624,7 +624,7 @@ export async function handleStartInnings(data: CallableData) {
     let state: CricketInningsState;
     try { state = createCricketInnings(initial); } catch (error) { throw new CommandError(400, "INVALID_ARGUMENT", (error as Error).message); }
     const innings = [...(match.cricket?.innings ?? []), { initial, state, superOver: isSuperOver }];
-    return { match: { ...match, status: "live", cricket: { innings, currentInnings: innings.length - 1 }, scoreSummary: inningsSummary(innings) } };
+    return { match: { ...match, status: "live", winnerTeamId: null, resultText: null, cricket: { innings, currentInnings: innings.length - 1 }, scoreSummary: inningsSummary(innings) } };
   });
 }
 
@@ -803,7 +803,7 @@ export async function handleUndoLastEvent(data: CallableData) {
 
 export async function handleEndInnings(data: CallableData) {
   return mutateMatch(data, (match) => {
-    if (match.sport !== "cricket" || !match.cricket?.innings?.length) throw new CommandError(400, "FAILED_PRECONDITION", "No cricket innings is active.");
+    if (match.sport !== "cricket" || match.status !== "live" || !match.cricket?.innings?.length) throw new CommandError(400, "FAILED_PRECONDITION", "No cricket innings is active.");
     const { index, innings } = currentCricketInnings(match);
     const state = { ...innings[index].state, completed: true } as CricketInningsState;
     innings[index] = { ...innings[index], state };
@@ -839,7 +839,7 @@ export async function handleEndMatch(data: CallableData) {
         winnerTeamId,
         resultText: throwballResultText(match.throwball, teamName),
       };
-    } else if (match.sport === "cricket" && !match.resultText) throw new CommandError(400, "FAILED_PRECONDITION", "Cricket result is not ready yet.");
+    } else if (match.sport === "cricket" && (!match.resultText || !match.winnerTeamId || !currentCricketInnings(match).entry.state.completed || match.status === "super-over")) throw new CommandError(400, "FAILED_PRECONDITION", "Cricket result is not ready yet.");
     const suggestions = await suggestManOfTheMatch(completed);
     const automaticWinner = suggestions[0] ?? null;
     return {

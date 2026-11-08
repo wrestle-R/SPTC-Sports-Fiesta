@@ -91,7 +91,11 @@ export function OrganizerMatchScorer({ matchId }: { matchId: string }) {
 
     setPending(true);
     try {
-      await callOrganizerCommand(name, revisionCommand(previousMatch.id, previousMatch.revision, data));
+      const response = await callOrganizerCommand<{ match?: PublicMatch }>(name, revisionCommand(previousMatch.id, previousMatch.revision, data));
+      if (response.match) {
+        const savedMatch = response.match;
+        matchState.mutate((current) => current && current.revision > savedMatch.revision ? current : savedMatch);
+      }
     } catch (cause) {
       matchState.mutate(() => previousMatch);
       const msg = cause instanceof Error ? cause.message : "Score update failed.";
@@ -168,11 +172,11 @@ function CricketConsole({ match, players, teams, pending, run, completeMatch, te
   return <div className="flex flex-col gap-4 sm:gap-6">
     <div className="hidden lg:block"><OrganizerCricketScorecard entries={entries} currentIndex={currentIndex} teamName={teamName} playerName={playerName} /></div>
     <Card className="shadow-none max-sm:border-0 max-sm:bg-transparent"><CardHeader><CardTitle>Ball-by-ball scoring</CardTitle><CardDescription>Score controls stay synced with the full scorecard.</CardDescription></CardHeader><CardContent className="max-sm:px-0">
-      {!current.strikerId ? <ParticipantSelect label="Next batter" players={battingPlayers.filter((player) => player.id !== current.nonStrikerId)} pending={pending} onSelect={(playerId) => run("selectNextBatter", { playerId })} /> : null}
-      {!current.currentBowlerId ? <ParticipantSelect label="Bowler for this over" players={bowlingPlayers} pending={pending} onSelect={(playerId) => run("selectCricketBowler", { playerId })} /> : null}
+      {!current.completed && !current.strikerId ? <ParticipantSelect label="Next batter" players={battingPlayers.filter((player) => player.id !== current.nonStrikerId)} pending={pending} onSelect={(playerId) => run("selectNextBatter", { playerId })} /> : null}
+      {!current.completed && !current.currentBowlerId ? <ParticipantSelect label="Bowler for this over" players={bowlingPlayers} pending={pending} onSelect={(playerId) => run("selectCricketBowler", { playerId })} /> : null}
       {current.strikerId && current.currentBowlerId && !current.completed ? <DeliveryControls current={current} pending={pending} run={run} battingPlayers={battingPlayers} bowlingPlayers={bowlingPlayers} playerName={playerName} battingTeamName={teamName(current.battingTeamId)} /> : null}
       <div className="mt-5 flex flex-wrap gap-2"><Button variant="outline" onClick={() => run("endInnings")} disabled={pending || current.completed}><Square data-icon="inline-start" /> End innings</Button></div>
-      {match.resultText || current.completed ? <AutomaticAwardCompletion pending={pending} onComplete={completeMatch} /> : null}
+      {match.winnerTeamId && current.completed && match.status !== "completed" ? <AutomaticAwardCompletion pending={pending} onComplete={completeMatch} /> : null}
     </CardContent></Card>
     <details className="group rounded-2xl border bg-muted/10 lg:hidden"><summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 text-sm font-semibold marker:content-none"><span>View full scorecard</span><span className="text-muted-foreground transition-transform group-open:rotate-180">⌄</span></summary><div className="border-t p-3"><OrganizerCricketScorecard entries={entries} currentIndex={currentIndex} teamName={teamName} playerName={playerName} /></div></details>
   </div>;
@@ -319,7 +323,9 @@ function DeliveryControls({ current, pending, run, battingPlayers, bowlingPlayer
     current.strikerId ? { value: current.strikerId, label: `Striker · ${playerName(current.strikerId)}` } : null,
     current.nonStrikerId ? { value: current.nonStrikerId, label: `Non-striker · ${playerName(current.nonStrikerId)}` } : null,
   ].filter((item): item is { value: string; label: string } => Boolean(item));
-  const runOutNeedsReplacement = current.wickets + 1 < current.battingLineup.length - 1;
+  const runOutNeedsReplacement = current.wickets + 1 < Math.min(current.battingLineup.length - 1, current.isSuperOver ? 2 : 8)
+    && current.legalBalls + (runOutNoBall ? 0 : 1) < current.maxOvers * 6
+    && !(current.targetScore != null && current.score + runOutRuns + (runOutNoBall ? 1 : 0) >= current.targetScore);
   const eligibleIncomingBatters = battingPlayers.filter((player) => player.id !== current.strikerId && player.id !== current.nonStrikerId && !current.batters[player.id]?.dismissal);
   const survivingBatterId = runOutPlayerId === current.strikerId ? current.nonStrikerId : current.strikerId ?? current.nonStrikerId;
   const selectedIncomingBatterId = eligibleIncomingBatters.some((player) => player.id === runOutIncomingBatterId)

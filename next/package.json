@@ -10,7 +10,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint app components hooks lib proxy.ts",
-    "test": "npm run test --workspace @sports-fiesta/domain",
+    "test": "npm run test --workspace @sports-fiesta/domain && vitest run",
     "typecheck": "tsc --noEmit && npm run typecheck --workspace @sports-fiesta/domain && npm run typecheck --workspace @sports-fiesta/theme",
     "db:schema": "set -a; . ./.env.local; set +a; psql \"$DATABASE_URL\" -f scripts/supabase-schema.sql",
     "db:seed": "tsx scripts/seed-supabase.ts"

@@ -287,7 +287,9 @@ export function recordCricketDelivery(
   if (runOutDismissal && explicitRunOutResolution) {
     const dismissedBatterId = runOutDismissal.playerOutId;
     const survivingBatterId = dismissedBatterId === strikerId ? nonStrikerId : strikerId;
-    const inningsContinues = wickets < state.battingLineup.length - 1;
+    const inningsContinues = wickets < Math.min(state.battingLineup.length - 1, state.isSuperOver ? 2 : 8)
+      && state.legalBalls + (legalDelivery ? 1 : 0) < state.maxOvers * 6
+      && !(state.targetScore != null && state.score + totalRuns >= state.targetScore);
 
     if (!inningsContinues) {
       if (input.replacementBatterId) {
