@@ -65,6 +65,10 @@ function assertRosterSnapshotMember(rosterSnapshot: PlayerId[], playerId: Player
 }
 
 export function createCricketInnings(input: CreateInningsInput): CricketInningsState {
+  if (!Number.isInteger(input.maxOvers ?? 5) || (input.maxOvers ?? 5) < 1) {
+    throw new Error("Overs must be a positive whole number.");
+  }
+  if (input.battingTeamId === input.bowlingTeamId) throw new Error("Choose two different teams.");
   const battingLineup = input.battingLineup ?? [];
   const bowlingLineup = input.bowlingLineup ?? [input.bowlerId];
   if (battingLineup.length < 2) {
@@ -76,6 +80,7 @@ export function createCricketInnings(input: CreateInningsInput): CricketInningsS
   if (input.strikerId === input.nonStrikerId) {
     throw new Error("Striker and non-striker must be different players.");
   }
+  assertRosterSnapshotMember(bowlingLineup, input.bowlerId, "Bowler");
   assertRosterSnapshotMember(battingLineup, input.strikerId, "Striker");
   assertRosterSnapshotMember(battingLineup, input.nonStrikerId, "Non-striker");
 
@@ -185,6 +190,19 @@ export function recordCricketDelivery(
   input: CricketDeliveryInput,
 ): CricketInningsState {
   if (state.completed) throw new Error("This innings is complete.");
+  if (!input || typeof input !== "object") throw new Error("A delivery is required.");
+  if (input.extraType && !["wide", "no-ball", "bye", "leg-bye", "penalty", "dead-ball"].includes(input.extraType)) throw new Error("Invalid extra type.");
+  if (input.extraRuns !== undefined && (!Number.isSafeInteger(input.extraRuns) || input.extraRuns < 0)) throw new Error("Extras must be a non-negative whole number.");
+  if (input.extraType && input.extraType !== "no-ball" && input.runsOffBat !== 0) throw new Error("Only no-balls can include runs off the bat.");
+  if (!input.extraType && input.extraRuns) throw new Error("Choose an extra type.");
+  if (input.dismissal) {
+    const type = input.dismissal.type;
+    if (!["bowled", "caught", "lbw", "run-out", "stumped", "hit-wicket", "retired-hurt", "retired-out", "obstructing-field"].includes(type)) throw new Error("Invalid dismissal type.");
+    if (input.extraType === "dead-ball" || input.extraType === "penalty") throw new Error("A wicket cannot be recorded on this extra.");
+    if (input.extraType === "no-ball" && !["run-out", "obstructing-field", "retired-hurt", "retired-out"].includes(type)) throw new Error("This dismissal is not allowed on a no-ball.");
+    if (!["run-out", "obstructing-field", "retired-hurt", "retired-out"].includes(type) && input.dismissal.playerOutId !== state.strikerId) throw new Error("Only the striker can be dismissed this way.");
+    if (input.dismissal.fielderId) assertRosterSnapshotMember(state.bowlingLineup, input.dismissal.fielderId, "Fielder");
+  }
   if (!state.strikerId) throw new Error("Select the next batter before scoring.");
   if (!state.currentBowlerId) throw new Error("Select a bowler for this over.");
   if (!Number.isInteger(input.runsOffBat) || input.runsOffBat < 0 || input.runsOffBat > 6) {
@@ -333,7 +351,7 @@ export function recordCricketDelivery(
   }
 
   const oversExhausted = legalBalls >= state.maxOvers * 6;
-  const MAX_WICKETS = 8;
+  const MAX_WICKETS = state.isSuperOver ? 2 : 8;
   const allOut = wickets >= Math.min(state.battingLineup.length - 1, MAX_WICKETS);
   const targetChased = state.targetScore != null && state.score + totalRuns >= state.targetScore;
   const completed = oversExhausted || allOut || targetChased;
@@ -358,9 +376,7 @@ export function recordCricketDelivery(
 export function setCricketBowler(state: CricketInningsState, bowlerId: PlayerId) {
   if (state.completed) throw new Error("This innings is complete.");
   if (state.currentBowlerId) throw new Error("The current over already has a bowler.");
-  if (state.bowlingLineup.length > 1) {
-    assertRosterSnapshotMember(state.bowlingLineup, bowlerId, "Bowler");
-  }
+  assertRosterSnapshotMember(state.bowlingLineup, bowlerId, "Bowler");
   return {
     ...state,
     currentBowlerId: bowlerId,
@@ -375,6 +391,7 @@ export function setCricketBowler(state: CricketInningsState, bowlerId: PlayerId)
 }
 
 export function setNextBatter(state: CricketInningsState, playerId: PlayerId) {
+  if (state.completed) throw new Error("This innings is complete.");
   if (state.strikerId) throw new Error("A striker is already selected.");
   assertRosterSnapshotMember(state.battingLineup, playerId, "Batter");
   if (playerId === state.nonStrikerId) {
@@ -441,7 +458,7 @@ export function cricketResultText(
 ) {
   if (!first || !second || first.score === second.score) return null;
   if (second.score > first.score) {
-    const wicketsToLose = Math.max(0, second.battingLineup.length - 1);
+    const wicketsToLose = Math.min(second.isSuperOver ? 2 : 8, Math.max(0, second.battingLineup.length - 1));
     const wicketsRemaining = Math.max(0, wicketsToLose - second.wickets);
     return `${teamName(second.battingTeamId)} beat ${teamName(second.bowlingTeamId)} by ${plural(wicketsRemaining, "wicket")}`;
   }
@@ -456,7 +473,8 @@ export function recalculateCricketInnings(
   for (const delivery of deliveries) {
     const recorded = delivery as CricketDeliveryInput & Partial<CricketDelivery>;
     if (!state.strikerId) {
-      const recordedStriker = recorded.strikerId;
+      const recordedStriker = state.legalBalls > 0 && state.legalBalls % 6 === 0
+        ? recorded.nonStrikerId : recorded.strikerId;
       const next = recordedStriker ?? state.battingLineup.find(
         (playerId) => playerId !== state.nonStrikerId && !state.batters[playerId]?.dismissal,
       );

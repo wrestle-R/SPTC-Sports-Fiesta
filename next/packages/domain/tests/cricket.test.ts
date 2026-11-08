@@ -350,4 +350,62 @@ describe("five-over cricket scoring", () => {
     expect(cricketResultText(first, chase, names)).toBe("Crimson Warriors beat God's Gladiators by 6 wickets");
     expect(cricketResultText(first, defended, names)).toBe("God's Gladiators beat Crimson Warriors by 8 runs");
   });
+  it("rejects extras that would corrupt team and player totals", () => {
+    for (const extraRuns of [-1, 1.5, NaN, Infinity]) {
+      expect(() => recordCricketDelivery(innings(), { runsOffBat: 0, extraType: "wide", extraRuns })).toThrow();
+    }
+    expect(() => recordCricketDelivery(innings(), { runsOffBat: 4, extraType: "bye", extraRuns: 1 })).toThrow();
+    expect(() => recordCricketDelivery(innings(), { runsOffBat: 0, extraType: "no-ball", dismissal: { type: "bowled", playerOutId: "a" } })).toThrow();
+  });
+
+  it("simulates a full match with extras, wickets, over changes, replay and a chase", () => {
+    let first = innings();
+    first = recordCricketDelivery(first, { runsOffBat: 0, extraType: "wide", extraRuns: 1 });
+    first = recordCricketDelivery(first, { runsOffBat: 4, extraType: "no-ball", extraRuns: 1 });
+    first = recordCricketDelivery(first, { runsOffBat: 0, dismissal: { type: "bowled", playerOutId: "a" } });
+    first = setNextBatter(first, "c");
+    while (!first.completed) {
+      if (!first.currentBowlerId) first = setCricketBowler(first, "g2");
+      first = recordCricketDelivery(first, { runsOffBat: 1 });
+    }
+    expect(first.score).toBe(35);
+    expect(first.legalBalls).toBe(30);
+    expect(first.wickets).toBe(1);
+    const initial = { battingTeamId: "red", bowlingTeamId: "green", battingLineup: battingOrder, bowlingLineup: ["g1", "g2", "g3", "g4", "g5"], strikerId: "a", nonStrikerId: "b", bowlerId: "g1" };
+    const replay = recalculateCricketInnings(initial, first.events);
+    expect(replay.score).toBe(first.score);
+    expect(replay.batters).toEqual(first.batters);
+    let chase = createCricketInnings({ ...initial, battingTeamId: "green", bowlingTeamId: "red", targetScore: first.score + 1 });
+    while (!chase.completed) {
+      if (!chase.currentBowlerId) chase = setCricketBowler(chase, "g2");
+      chase = recordCricketDelivery(chase, { runsOffBat: 6 });
+    }
+    expect(chase.score).toBe(36);
+    expect(chase.legalBalls).toBe(6);
+    expect(() => recordCricketDelivery(chase, { runsOffBat: 1 })).toThrow(/complete/i);
+  });
+
+  it("stops a super over at two wickets", () => {
+    let state: ReturnType<typeof innings> = { ...innings(), isSuperOver: true, maxOvers: 1 };
+    state = recordCricketDelivery(state, { runsOffBat: 0, dismissal: { type: "bowled", playerOutId: "a" } });
+    state = setNextBatter(state, "c");
+    state = recordCricketDelivery(state, { runsOffBat: 0, dismissal: { type: "bowled", playerOutId: "c" } });
+    expect(state.completed).toBe(true);
+    expect(state.wickets).toBe(2);
+  });
+
+  it("replays the selected replacement after a last-ball wicket", () => {
+    const initial = { battingTeamId: "red", bowlingTeamId: "green", battingLineup: battingOrder, bowlingLineup: ["g1", "g2", "g3", "g4", "g5"], strikerId: "a", nonStrikerId: "b", bowlerId: "g1" };
+    let state = createCricketInnings(initial);
+    for (let i = 0; i < 5; i++) state = recordCricketDelivery(state, { runsOffBat: 0 });
+    state = recordCricketDelivery(state, { runsOffBat: 0, dismissal: { type: "bowled", playerOutId: "a" } });
+    state = setNextBatter(state, "d");
+    state = setCricketBowler(state, "g2");
+    state = recordCricketDelivery(state, { runsOffBat: 4 });
+    const replay = recalculateCricketInnings(initial, state.events);
+    expect(replay.strikerId).toBe(state.strikerId);
+    expect(replay.nonStrikerId).toBe("d");
+    expect(replay.batters).toEqual(state.batters);
+  });
+
 });

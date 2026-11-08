@@ -588,6 +588,12 @@ export async function handleStartInnings(data: CallableData) {
     if (battingTeamId === bowlingTeamId || ![match.homeTeamId, match.awayTeamId].includes(battingTeamId) || ![match.homeTeamId, match.awayTeamId].includes(bowlingTeamId)) {
       throw new CommandError(400, "INVALID_ARGUMENT", "Choose the two teams in this fixture.");
     }
+    const existing = match.cricket?.innings ?? [];
+    if (isSuperOver !== (match.status === "super-over")) throw new CommandError(400, "INVALID_ARGUMENT", "Choose the correct innings format.");
+    const previous = existing.at(-1);
+    if (previous && !previous.state.completed) throw new CommandError(400, "FAILED_PRECONDITION", "Finish the current innings first.");
+    if (!isSuperOver && existing.length >= 2) throw new CommandError(400, "FAILED_PRECONDITION", "Both innings have already been played.");
+    if (previous && (!isSuperOver || existing.filter((entry) => entry.superOver).length % 2 === 1) && battingTeamId !== previous.state.bowlingTeamId) throw new CommandError(400, "INVALID_ARGUMENT", "The other team must bat in the reply.");
     const battingRoster = await getTeamRoster(battingTeamId);
     const bowlingRoster = await getTeamRoster(bowlingTeamId);
     const battingLineup = battingRoster.map((player) => player.id);
