@@ -18,6 +18,7 @@ export function usePrivateTournament<T>() {
 export async function callOrganizerCommand<T>(name: string, data: Record<string, unknown> = {}) {
   const response = await fetch("/api/organizer/command", {
     method: "POST",
+    signal: AbortSignal.timeout(20000),
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ command: name, data }),
   });

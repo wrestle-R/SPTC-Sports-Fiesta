@@ -15,6 +15,9 @@ import {
 } from "@/lib/command-handlers";
 
 export async function POST(request: Request) {
+  if (request.headers.get("sec-fetch-site") === "cross-site") {
+    return NextResponse.json({ error: { message: "Cross-site commands are not allowed.", status: "PERMISSION_DENIED" } }, { status: 403 });
+  }
   if (!(await hasOrganizerAccess())) {
     return NextResponse.json({ error: { message: "Organizer access required.", status: "UNAUTHENTICATED" } }, { status: 401 });
   }
